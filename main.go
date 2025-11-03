@@ -18,26 +18,30 @@ type RSS struct {
 }
 
 type Channel struct {
+	Link  string `xml:"link"`
 	Items []Item `xml:"item"`
 }
 
 type Item struct {
-	Title       string       `xml:"title"`
-	Link        string       `xml:"link"`
-	Key         Key          `xml:"key"`
-	Summary     string       `xml:"summary"`
-	Type        TypeField    `xml:"type"`
-	Priority    Priority     `xml:"priority"`
-	Status      Status       `xml:"status"`
-	Resolution  Resolution   `xml:"resolution"`
-	Assignee    string       `xml:"assignee"`
-	Reporter    string       `xml:"reporter"`
-	Labels      Labels       `xml:"labels"`
-	Description string       `xml:"description"`
-	Created     string       `xml:"created"`
-	Updated     string       `xml:"updated"`
-	Due         string       `xml:"due"`
-	Comments    Comments     `xml:"comments"`
+	Title        string       `xml:"title"`
+	Link         string       `xml:"link"`
+	Key          Key          `xml:"key"`
+	Summary      string       `xml:"summary"`
+	Type         TypeField    `xml:"type"`
+	Priority     Priority     `xml:"priority"`
+	Status       Status       `xml:"status"`
+	Resolution   Resolution   `xml:"resolution"`
+	Assignee     string       `xml:"assignee"`
+	Reporter     string       `xml:"reporter"`
+	Labels       Labels       `xml:"labels"`
+	Components   Components   `xml:"component"`
+	Versions     Versions     `xml:"version"`
+	Description  string       `xml:"description"`
+	Created      string       `xml:"created"`
+	Updated      string       `xml:"updated"`
+	Due          string       `xml:"due"`
+	Comments     Comments     `xml:"comments"`
+	Attachments  Attachments  `xml:"attachments"`
 	CustomFields CustomFields `xml:"customfields"`
 }
 
@@ -73,6 +77,14 @@ type Labels struct {
 	Label []string `xml:"label"`
 }
 
+type Components struct {
+	Component []string `xml:"component"`
+}
+
+type Versions struct {
+	Version []string `xml:"version"`
+}
+
 type Comments struct {
 	Comment []Comment `xml:"comment"`
 }
@@ -82,6 +94,18 @@ type Comment struct {
 	Author  string `xml:"author,attr"`
 	Created string `xml:"created,attr"`
 	Value   string `xml:",chardata"`
+}
+
+type Attachments struct {
+	Attachment []Attachment `xml:"attachment"`
+}
+
+type Attachment struct {
+	ID      string `xml:"id,attr"`
+	Name    string `xml:"name,attr"`
+	Size    string `xml:"size,attr"`
+	Author  string `xml:"author,attr"`
+	Created string `xml:"created,attr"`
 }
 
 type CustomFields struct {
@@ -196,42 +220,60 @@ func processFile(inputFile string, config Config) error {
 		return fmt.Errorf("no items found in XML")
 	}
 
-	item := rss.Channel.Items[0]
-
-	// Determine output file
-	outputFile := config.output
-	if outputFile == "" {
-		base := strings.TrimSuffix(inputFile, filepath.Ext(inputFile))
-		if config.details {
-			outputFile = base + ".details.md"
-		} else {
-			outputFile = base + ".md"
+	// Process each item
+	for i, item := range rss.Channel.Items {
+		// Determine output file
+		outputFile := config.output
+		if outputFile == "" {
+			base := strings.TrimSuffix(inputFile, filepath.Ext(inputFile))
+			extension := ".md"
+			if config.details {
+				extension = ".details.md"
+			}
+			
+			// If multiple items, insert issue key in filename
+			if len(rss.Channel.Items) > 1 {
+				outputFile = fmt.Sprintf("%s-%s%s", base, item.Key.Value, extension)
+			} else {
+				outputFile = base + extension
+			}
+		} else if len(rss.Channel.Items) > 1 {
+			// Custom output specified, but multiple items
+			// Insert index or issue key before extension
+			ext := filepath.Ext(outputFile)
+			base := strings.TrimSuffix(outputFile, ext)
+			if i == 0 {
+				// First item uses the specified name
+				// Subsequent items get the key inserted
+			} else {
+				outputFile = fmt.Sprintf("%s-%s%s", base, item.Key.Value, ext)
+			}
 		}
-	}
 
-	// Check if file exists
-	if !config.force {
-		if _, err := os.Stat(outputFile); err == nil {
-			return fmt.Errorf("output file %s already exists (use -f to overwrite)", outputFile)
+		// Check if file exists
+		if !config.force {
+			if _, err := os.Stat(outputFile); err == nil {
+				return fmt.Errorf("output file %s already exists (use -f to overwrite)", outputFile)
+			}
 		}
-	}
 
-	// Generate markdown
-	md := generateMarkdown(item, config.details)
+		// Generate markdown
+		md := generateMarkdown(item, rss.Channel.Link, config.details)
 
-	// Write output
-	if err := os.WriteFile(outputFile, []byte(md), 0644); err != nil {
-		return fmt.Errorf("failed to write output: %w", err)
-	}
+		// Write output
+		if err := os.WriteFile(outputFile, []byte(md), 0644); err != nil {
+			return fmt.Errorf("failed to write output: %w", err)
+		}
 
-	if config.verbose {
-		fmt.Printf("Created %s\n", outputFile)
+		if config.verbose {
+			fmt.Printf("Created %s\n", outputFile)
+		}
 	}
 
 	return nil
 }
 
-func generateMarkdown(item Item, includeDetails bool) string {
+func generateMarkdown(item Item, channelLink string, includeDetails bool) string {
 	var sb strings.Builder
 
 	// Title
@@ -248,6 +290,12 @@ func generateMarkdown(item Item, includeDetails bool) string {
 	fmt.Fprintf(&sb, "- **Reporter:** %s\n", item.Reporter)
 	if len(item.Labels.Label) > 0 {
 		fmt.Fprintf(&sb, "- **Labels:** %s\n", strings.Join(item.Labels.Label, ", "))
+	}
+	if includeDetails && len(item.Components.Component) > 0 {
+		fmt.Fprintf(&sb, "- **Components:** %s\n", strings.Join(item.Components.Component, ", "))
+	}
+	if includeDetails && len(item.Versions.Version) > 0 {
+		fmt.Fprintf(&sb, "- **Versions:** %s\n", strings.Join(item.Versions.Version, ", "))
 	}
 	sb.WriteString("\n")
 
@@ -340,6 +388,29 @@ func generateMarkdown(item Item, includeDetails bool) string {
 					sb.WriteString("\n")
 				}
 			}
+		}
+	}
+
+	// Attachments (if details enabled)
+	if includeDetails && len(item.Attachments.Attachment) > 0 {
+		sb.WriteString("\n## Attachments\n\n")
+		for _, att := range item.Attachments.Attachment {
+			attURL := fmt.Sprintf("%s/rest/api/3/attachment/content/%s", channelLink, att.ID)
+			fmt.Fprintf(&sb, "- [%s](%s)", att.Name, attURL)
+			if att.Size != "" || att.Created != "" {
+				sb.WriteString(" (")
+				if att.Size != "" {
+					fmt.Fprintf(&sb, "Size: %s bytes", att.Size)
+				}
+				if att.Created != "" {
+					if att.Size != "" {
+						sb.WriteString(", ")
+					}
+					fmt.Fprintf(&sb, "Created: %s", att.Created)
+				}
+				sb.WriteString(")")
+			}
+			sb.WriteString("\n")
 		}
 	}
 
