@@ -4,8 +4,35 @@ A Go command-line tool to convert JIRA XML exports to Markdown format.
 
 ## Installation
 
+Build the binary:
 ```bash
 go build -o converttomd-jira
+```
+
+Install system-wide:
+```bash
+make install
+```
+
+### Optional: Create a Shorter Alias
+
+For convenience, you can alias `jira-md` to `converttomd-jira`:
+
+**For zsh:**
+```bash
+echo 'alias jira-md="converttomd-jira"' >> ~/.zshrc
+source ~/.zshrc
+```
+
+**For bash:**
+```bash
+echo 'alias jira-md="converttomd-jira"' >> ~/.bashrc
+source ~/.bashrc
+```
+
+Then use it as:
+```bash
+jira-md AI-538.xml
 ```
 
 ## Usage
